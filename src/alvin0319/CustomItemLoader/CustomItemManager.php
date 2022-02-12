@@ -32,6 +32,7 @@ use pocketmine\item\StringToItemParser;
 use pocketmine\network\mcpe\convert\GlobalItemTypeDictionary;
 use pocketmine\network\mcpe\convert\ItemTranslator;
 use pocketmine\network\mcpe\protocol\ItemComponentPacket;
+use pocketmine\network\mcpe\protocol\ProtocolInfo;
 use pocketmine\network\mcpe\protocol\serializer\ItemTypeDictionary;
 use pocketmine\network\mcpe\protocol\types\CacheableNbt;
 use pocketmine\network\mcpe\protocol\types\ItemComponentPacketEntry;
@@ -63,11 +64,12 @@ final class CustomItemManager{
 
 	protected array $netToCoreValues = [];
 
-	protected ReflectionProperty $itemTypeMap;
+	/** @var ReflectionProperty[] */
+	protected array $itemTypeMap;
 
 	/** @var ItemComponentPacketEntry[] */
 	protected array $packetEntries = [];
-	/** @var ItemTypeEntry[] */
+	/** @var ItemTypeEntry[][] */
 	protected array $itemTypeEntries = [];
 
 	public function __construct(){
@@ -80,11 +82,14 @@ final class CustomItemManager{
 		$this->coreToNetValues = $this->coreToNetMap->getValue(ItemTranslator::getInstance());
 		$this->netToCoreValues = $this->netToCoreMap->getValue(ItemTranslator::getInstance());
 
-		$ref_1 = new ReflectionClass(ItemTypeDictionary::class);
-		$this->itemTypeMap = $ref_1->getProperty("itemTypes");
-		$this->itemTypeMap->setAccessible(true);
+		foreach(ProtocolInfo::ACCEPTED_PROTOCOL as $acceptedProtocol){
+			$protocol = GlobalItemTypeDictionary::getDictionaryProtocol($acceptedProtocol);
+			$ref_1 = new ReflectionClass(ItemTypeDictionary::class);
+			$this->itemTypeMap[$protocol] = $ref_1->getProperty("itemTypes");
+			$this->itemTypeMap[$protocol]->setAccessible(true);
 
-		$this->itemTypeEntries = $this->itemTypeMap->getValue(GlobalItemTypeDictionary::getInstance()->getDictionary());
+			$this->itemTypeEntries[$protocol] = $this->itemTypeMap[$protocol]->getValue(GlobalItemTypeDictionary::getInstance()->getDictionary($protocol));
+		}
 
 		$this->packetEntries = [];
 
@@ -112,10 +117,13 @@ final class CustomItemManager{
 			$id = $item->getProperties()->getId();
 			$runtimeId = $item->getProperties()->getRuntimeId();
 
-			$this->coreToNetValues[$id] = $runtimeId;
-			$this->netToCoreValues[$runtimeId] = $id;
+			foreach(ProtocolInfo::ACCEPTED_PROTOCOL as $acceptedProtocol) {
+				$protocol = GlobalItemTypeDictionary::getDictionaryProtocol($acceptedProtocol);
+				$this->coreToNetValues[$protocol][$id] = $runtimeId;
+				$this->netToCoreValues[$protocol][$runtimeId] = $id;
 
-			$this->itemTypeEntries[] = new ItemTypeEntry($item->getProperties()->getNamespace(), $runtimeId, true);
+				$this->itemTypeEntries[$protocol][] = new ItemTypeEntry($item->getProperties()->getNamespace(), $runtimeId, true);
+			}
 
 			$this->packetEntries[] = new ItemComponentPacketEntry($item->getProperties()->getNamespace(), new CacheableNbt($item->getProperties()->getNbt()));
 
@@ -137,7 +145,10 @@ final class CustomItemManager{
 	private function refresh() : void{
 		$this->netToCoreMap->setValue(ItemTranslator::getInstance(), $this->netToCoreValues);
 		$this->coreToNetMap->setValue(ItemTranslator::getInstance(), $this->coreToNetValues);
-		$this->itemTypeMap->setValue(GlobalItemTypeDictionary::getInstance()->getDictionary(), $this->itemTypeEntries);
+		foreach(ProtocolInfo::ACCEPTED_PROTOCOL as $acceptedProtocol){
+			$protocol = GlobalItemTypeDictionary::getDictionaryProtocol($acceptedProtocol);
+			$this->itemTypeMap[$protocol]->setValue(GlobalItemTypeDictionary::getInstance()->getDictionary($protocol), $this->itemTypeEntries[$protocol]);
+		}
 		$this->packet = ItemComponentPacket::create($this->packetEntries);
 	}
 
